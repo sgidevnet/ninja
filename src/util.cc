@@ -502,6 +502,8 @@ int GetProcessorCount() {
   SYSTEM_INFO info;
   GetNativeSystemInfo(&info);
   return info.dwNumberOfProcessors;
+#elif defined(__sgi)
+  return sysconf(_SC_NPROC_ONLN);
 #else
   return sysconf(_SC_NPROCESSORS_ONLN);
 #endif
@@ -576,12 +578,16 @@ double GetLoadAverage() {
 #else
 double GetLoadAverage() {
   double loadavg[3] = { 0.0f, 0.0f, 0.0f };
+#ifdef __sgi
+  return -0.0f;
+#else
   if (getloadavg(loadavg, 3) < 0) {
     // Maybe we should return an error here or the availability of
     // getloadavg(3) should be checked when ninja is configured.
     return -0.0f;
   }
   return loadavg[0];
+#endif
 }
 #endif // _WIN32
 
