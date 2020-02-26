@@ -60,6 +60,8 @@ class Platform(object):
             self._platform = 'netbsd'
         elif self._platform.startswith('aix'):
             self._platform = 'aix'
+        elif self._platform.startswith('irix'):
+            self._platform = 'irix'
         elif self._platform.startswith('os400'):
             self._platform = 'os400'
         elif self._platform.startswith('dragonfly'):
@@ -69,7 +71,7 @@ class Platform(object):
     def known_platforms():
       return ['linux', 'darwin', 'freebsd', 'openbsd', 'solaris', 'sunos5',
               'mingw', 'msvc', 'gnukfreebsd', 'bitrig', 'netbsd', 'aix',
-              'dragonfly']
+              'dragonfly', 'irix']
 
     def platform(self):
         return self._platform
@@ -98,6 +100,9 @@ class Platform(object):
 
     def is_aix(self):
         return self._platform == 'aix'
+
+    def is_irix(self):
+        return self._platform == 'irix'
 
     def is_os400_pase(self):
         return self._platform == 'os400' or os.uname().sysname.startswith('OS400')
@@ -528,7 +533,7 @@ if platform.is_windows():
     objs += cc('getopt')
 else:
     objs += cxx('subprocess-posix')
-if platform.is_aix():
+if platform.is_aix() or platform.is_irix():
     objs += cc('getopt')
 if platform.is_msvc():
     ninja_lib = n.build(built('ninja.lib'), 'ar', objs)

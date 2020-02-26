@@ -23,7 +23,7 @@
 #include "getopt.h"
 #include <direct.h>
 #include <windows.h>
-#elif defined(_AIX)
+#elif defined(_AIX) || defined(__sgi)
 #include "getopt.h"
 #include <unistd.h>
 #else

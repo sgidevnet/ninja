@@ -492,7 +492,11 @@ int GetProcessorCount() {
     return CPU_COUNT(&set);
   }
 #endif
+#ifdef __sgi
+  return sysconf(_SC_NPROC_ONLN);
+#else
   return sysconf(_SC_NPROCESSORS_ONLN);
+#endif
 #endif
 }
 
@@ -586,11 +590,13 @@ double GetLoadAverage() {
 #else
 double GetLoadAverage() {
   double loadavg[3] = { 0.0f, 0.0f, 0.0f };
+#ifndef __sgi
   if (getloadavg(loadavg, 3) < 0) {
     // Maybe we should return an error here or the availability of
     // getloadavg(3) should be checked when ninja is configured.
     return -0.0f;
   }
+#endif
   return loadavg[0];
 }
 #endif // _WIN32

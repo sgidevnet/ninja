@@ -281,7 +281,11 @@ bool SubprocessSet::DoWork() {
   }
 
   interrupted_ = 0;
+#ifndef __sgi
   int ret = pselect(nfds, &set, 0, 0, 0, &old_mask_);
+#else
+  int ret = select(nfds, &set, 0, 0, 0);
+#endif
   if (ret == -1) {
     if (errno != EINTR) {
       perror("ninja: pselect");
