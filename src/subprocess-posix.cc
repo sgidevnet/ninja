@@ -14,7 +14,6 @@
 
 #include "subprocess.h"
 
-#include <sys/select.h>
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -23,9 +22,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/wait.h>
-#include <spawn.h>
-
-extern char** environ;
 
 #include "util.h"
 
@@ -54,74 +50,61 @@ bool Subprocess::Start(SubprocessSet* set, const string& command) {
 #endif  // !USE_PPOLL
   SetCloseOnExec(fd_);
 
-  posix_spawn_file_actions_t action;
-  int err = posix_spawn_file_actions_init(&action);
-  if (err != 0)
-    Fatal("posix_spawn_file_actions_init: %s", strerror(err));
+  pid_ = fork();
+  if (pid_ < 0)
+    Fatal("fork: %s", strerror(errno));
 
-  err = posix_spawn_file_actions_addclose(&action, output_pipe[0]);
-  if (err != 0)
-    Fatal("posix_spawn_file_actions_addclose: %s", strerror(err));
+  if (pid_ == 0) {
+    close(output_pipe[0]);
 
-  posix_spawnattr_t attr;
-  err = posix_spawnattr_init(&attr);
-  if (err != 0)
-    Fatal("posix_spawnattr_init: %s", strerror(err));
+    // Track which fd we use to report errors on.
+    int error_pipe = output_pipe[1];
+    do {
+      if (sigaction(SIGINT, &set->old_int_act_, 0) < 0)
+        break;
+      if (sigaction(SIGTERM, &set->old_term_act_, 0) < 0)
+        break;
+      if (sigaction(SIGHUP, &set->old_hup_act_, 0) < 0)
+        break;
+      if (sigprocmask(SIG_SETMASK, &set->old_mask_, 0) < 0)
+        break;
 
-  short flags = 0;
+      if (!use_console_) {
+        // Put the child in its own process group, so ctrl-c won't reach it.
+        if (setpgid(0, 0) < 0)
+          break;
 
-  flags |= POSIX_SPAWN_SETSIGMASK;
-  err = posix_spawnattr_setsigmask(&attr, &set->old_mask_);
-  if (err != 0)
-    Fatal("posix_spawnattr_setsigmask: %s", strerror(err));
-  // Signals which are set to be caught in the calling process image are set to
-  // default action in the new process image, so no explicit
-  // POSIX_SPAWN_SETSIGDEF parameter is needed.
+        // Open /dev/null over stdin.
+        int devnull = open("/dev/null", O_RDONLY);
+        if (devnull < 0)
+          break;
+        if (dup2(devnull, 0) < 0)
+          break;
+        close(devnull);
 
-  if (!use_console_) {
-    // Put the child in its own process group, so ctrl-c won't reach it.
-    flags |= POSIX_SPAWN_SETPGROUP;
-    // No need to posix_spawnattr_setpgroup(&attr, 0), it's the default.
+        if (dup2(output_pipe[1], 1) < 0 ||
+            dup2(output_pipe[1], 2) < 0)
+          break;
 
-    // Open /dev/null over stdin.
-    err = posix_spawn_file_actions_addopen(&action, 0, "/dev/null", O_RDONLY,
-          0);
-    if (err != 0) {
-      Fatal("posix_spawn_file_actions_addopen: %s", strerror(err));
+        // Now can use stderr for errors.
+        error_pipe = 2;
+        close(output_pipe[1]);
+      }
+      // In the console case, output_pipe is still inherited by the child and
+      // closed when the subprocess finishes, which then notifies ninja.
+
+      execl("/bin/sh", "/bin/sh", "-c", command.c_str(), (char *) NULL);
+    } while (false);
+
+    // If we get here, something went wrong; the execl should have
+    // replaced us.
+    char* err = strerror(errno);
+    if (write(error_pipe, err, strlen(err)) < 0) {
+      // If the write fails, there's nothing we can do.
+      // But this block seems necessary to silence the warning.
     }
-
-    err = posix_spawn_file_actions_adddup2(&action, output_pipe[1], 1);
-    if (err != 0)
-      Fatal("posix_spawn_file_actions_adddup2: %s", strerror(err));
-    err = posix_spawn_file_actions_adddup2(&action, output_pipe[1], 2);
-    if (err != 0)
-      Fatal("posix_spawn_file_actions_adddup2: %s", strerror(err));
-    err = posix_spawn_file_actions_addclose(&action, output_pipe[1]);
-    if (err != 0)
-      Fatal("posix_spawn_file_actions_addclose: %s", strerror(err));
-    // In the console case, output_pipe is still inherited by the child and
-    // closed when the subprocess finishes, which then notifies ninja.
+    _exit(1);
   }
-#ifdef POSIX_SPAWN_USEVFORK
-  flags |= POSIX_SPAWN_USEVFORK;
-#endif
-
-  err = posix_spawnattr_setflags(&attr, flags);
-  if (err != 0)
-    Fatal("posix_spawnattr_setflags: %s", strerror(err));
-
-  const char* spawned_args[] = { "/bin/sh", "-c", command.c_str(), NULL };
-  err = posix_spawn(&pid_, "/bin/sh", &action, &attr,
-        const_cast<char**>(spawned_args), environ);
-  if (err != 0)
-    Fatal("posix_spawn: %s", strerror(err));
-
-  err = posix_spawnattr_destroy(&attr);
-  if (err != 0)
-    Fatal("posix_spawnattr_destroy: %s", strerror(err));
-  err = posix_spawn_file_actions_destroy(&action);
-  if (err != 0)
-    Fatal("posix_spawn_file_actions_destroy: %s", strerror(err));
 
   close(output_pipe[1]);
   return true;
